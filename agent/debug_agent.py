@@ -43,7 +43,7 @@ from agent.backends.llm_client import (
 from agent.memory_loader import MemoryLoader
 from agent.verilog_tracer import VerilogTracer
 from agent.waveform import waveform_context as build_waveform_context
-from agent.predict_force import localize as predict_force_localize, load_settings as localizer_settings
+from agent.predict_force import localize as predict_force_localize
 
 logger = logging.getLogger(__name__)
 
@@ -59,22 +59,15 @@ DEFAULT_MAX_LOOPS = 3
 # Prompts
 # ---------------------------------------------------------------------------
 
-def build_system_prompt(memory: MemoryLoader | None) -> str:
+def build_system_prompt(memory: MemoryLoader) -> str:
     """System prompt: the full knowledge base and the two reply formats (COMPILE FIX when the
     code does not compile, FULL ANALYSIS when it compiles but fails testbench checks)."""
-    if memory is not None:
-        context_bundle = memory.build_context_bundle()
-        kb_intro = ("You have access to a knowledge base of Verilog references, common bug patterns,\n"
-                    "    fix templates, and correct module templates. Use this knowledge to guide your analysis.\n\n    ")
-        kb_block = f"=== KNOWLEDGE BASE ===\n    {context_bundle}\n\n    "
-        kb_xref = "- Cross-reference against the known bug patterns and templates.\n    "
-        verify = "Pattern matches from memory are hints only —\n    always verify"
-    else:
-        context_bundle = ""
-        kb_intro = ""
-        kb_block = ""
-        kb_xref = ""
-        verify = "Always verify"
+    context_bundle = memory.build_context_bundle()
+    kb_intro = ("You have access to a knowledge base of Verilog references, common bug patterns,\n"
+                "    fix templates, and correct module templates. Use this knowledge to guide your analysis.\n\n    ")
+    kb_block = f"=== KNOWLEDGE BASE ===\n    {context_bundle}\n\n    "
+    kb_xref = "- Cross-reference against the known bug patterns and templates.\n    "
+    verify = "Pattern matches from memory are hints only —\n    always verify"
     return textwrap.dedent(f"""\
     You are VerilogDebugAgent, an expert hardware verification and debugging AI.
     Your task is to systematically find and fix bugs in Verilog/SystemVerilog code.
@@ -549,14 +542,12 @@ def _trace_design(source: Path, tb_result: dict, graph_save_path: Path | None = 
     return ctx
 
 
-def _run_localizer(source: Path, tb_file, description: str, trace: dict, iteration: int,
-                   forcing: bool = True) -> dict:
+def _run_localizer(source: Path, tb_file, description: str, trace: dict, iteration: int) -> dict:
     """Run predict-force localization; returns its result dict (or {"error": ...})."""
     try:
         result = predict_force_localize(
             str(source), tb_file, description,
             trace["buggy_signals"], trace["dependency_text"],
-            settings=None if forcing else {**localizer_settings(), "force": False},
             tracer=trace["tracer"],
         )
     except Exception as e:
@@ -601,8 +592,6 @@ def run_agent(
     waveform: bool = False,
     localize: bool = False,
     save_prompts: bool = False,
-    use_kb: bool = True,
-    forcing: bool = True,
 ):
     """Execute the iterative multi-loop debugging pipeline.
     """
@@ -630,13 +619,9 @@ def run_agent(
     )
 
     # --- Step 1: Load knowledge base ---
-    if use_kb:
-        logger.info("Loading knowledge base...")
-        memory = MemoryLoader()
-        memory.load_all()
-    else:
-        logger.info("--no-kb: no knowledge base in the system prompt")
-        memory = None
+    logger.info("Loading knowledge base...")
+    memory = MemoryLoader()
+    memory.load_all()
 
     # --- Step 2: Run static analysis on original ---
     logger.info("Running static analysis on original source...")
@@ -760,8 +745,7 @@ def run_agent(
                             or f'{waveform_info.get("chars")} chars')
                 logger.info("Waveform table (iter %d):\n%s", iteration, waveform_text or "(none)")
             if localize and has_testbench:
-                localizer = _run_localizer(trace_source, tb_file, design_description or "", trace, iteration,
-                                           forcing=forcing)
+                localizer = _run_localizer(trace_source, tb_file, design_description or "", trace, iteration)
         buggy_signals = trace["buggy_signals"]
         dependency_context = trace["dependency_context"]
 
@@ -980,7 +964,7 @@ def run_agent(
         "model": resolved_model,
         "backend": backend,
         "max_loops": max_loops,
-        "settings": {"waveform": waveform, "localize": localize, "forcing": forcing, "knowledge_base": use_kb},
+        "settings": {"waveform": waveform, "localize": localize},
         "iterations_used": len(loop_history),
         "best_iteration": best["iteration"],
         "rollbacks": sum(1 for r in loop_history if r.get("rolled_back")),
@@ -1180,15 +1164,6 @@ def main():
              "(config.yaml `localizer:`) and add the suspicious lines to the refinement prompt",
     )
     parser.add_argument(
-        "--no-kb", action="store_true",
-        help="Ablation: leave the knowledge base (skills/, bug patterns, templates) out of the system prompt",
-    )
-    parser.add_argument(
-        "--no-forcing", action="store_true",
-        help="Ablation (with --localize): the localizer predicts once and nothing is forced or simulated; "
-             "suspects come from the unverified prediction",
-    )
-    parser.add_argument(
         "--save-prompts", action="store_true",
         help="Save every LLM request and reply to <output-dir>/<stem>_prompts.jsonl "
              "(vllm backend; for replaying the exact calls)",
@@ -1228,8 +1203,6 @@ def main():
         waveform=args.waveform,
         localize=args.localize,
         save_prompts=args.save_prompts,
-        use_kb=not args.no_kb,
-        forcing=not args.no_forcing,
     )
 
 

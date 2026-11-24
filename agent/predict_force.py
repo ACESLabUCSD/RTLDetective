@@ -40,8 +40,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULTS = dict(model="Qwen/Qwen3-8B", port=8001, gpu_ids="2", gpu_memory_utilization=0.6,
                 max_model_len=16384, rounds=4, window=4, max_signals=10, temperature=0.7, top_p=0.95,
-                top_k=20, max_new_tokens=1024, think=False, use_deps=True,
-                force=True)   # force=False: ablation, one unchecked prediction (no forced simulations)
+                top_k=20, max_new_tokens=1024, think=False, use_deps=True)
 RADIX = {"h": 16, "b": 2, "d": 10}
 VALUE = r"(?<![\w.'])(?:(\d+)?'([hHbBdD]))?([0-9a-fA-FxXzZ_]+)\b"   # 179, 16'h2d61, 8'b1010, xx
 
@@ -550,7 +549,7 @@ def driver_lines(tracer: VerilogTracer, sig: str) -> list[int]:
     return sorted(lines)
 
 
-def find_suspects(d: Design, final: dict, confirm: bool = True) -> list[dict]:
+def find_suspects(d: Design, final: dict) -> list[dict]:
     """Signals wrong while their path inputs are right (a register's at the cycle before)"""
     pv = lambda s, c: final.get(s, {}).get(f"c{c}", "unknown")
     wrong = lambda s, c: pv(s, c).isdigit() and d.waves[s][c] != pv(s, c)
@@ -563,9 +562,6 @@ def find_suspects(d: Design, final: dict, confirm: bool = True) -> list[dict]:
                 suspects.append(dict(signal=s, cycle=c, actual=d.waves[s][c], expected=pv(s, c),
                                      lines=driver_lines(d.tracer, s), early=cin not in d.cycles))
     for x in suspects:
-        if not confirm:
-            x["confirmed"] = "unchecked"
-            continue
         x["confirmed"] = None if x["signal"] in d.meta["outputs"] else run_forced(d, to_force(d, final, [x["signal"]]))["fixed"]
     return suspects
 
@@ -593,18 +589,13 @@ def localize(bug_path: str, tb_path: str, description: str = "", targets: list[s
     wiring = propagate_wiring(d, known)
     prompt = build_prompt(d, description, deps if S["use_deps"] else "", known)
 
-    if S["force"]:
-        accepted, pred, rounds = predict(d, url or ensure_server(S), S, prompt, known)
-        minimal, run = minimize(d, accepted) if accepted else (None, None)
-        final = ({s: {f"c{c}": run["sim"]["waves"][s][c] for c in d.cycles} for s in d.signals}
-                 if run and run["fixed"] else accepted or pred)
-        suspects = find_suspects(d, final)
-    else:   # ablation: one prediction, nothing forced; suspects from where it disagrees with the waveform
-        pred = parse_prediction(d, ask(url or ensure_server(S), S, [{"role": "user", "content": prompt}]), known)
-        accepted, rounds, minimal = None, 1, None
-        suspects = find_suspects(d, pred, confirm=False)
+    accepted, pred, rounds = predict(d, url or ensure_server(S), S, prompt, known)
+    minimal, run = minimize(d, accepted) if accepted else (None, None)
+    final = ({s: {f"c{c}": run["sim"]["waves"][s][c] for c in d.cycles} for s in d.signals}
+             if run and run["fixed"] else accepted or pred)
+    suspects = find_suspects(d, final)
 
-    result = dict(accepted=accepted is not None, forced=S["force"], rounds=rounds, signals=d.signals, cycles=d.cycles,
+    result = dict(accepted=accepted is not None, rounds=rounds, signals=d.signals, cycles=d.cycles,
                   needed_changes=[f"{s} c{k}" for s, k in minimal or []], suspects=suspects,
                   wiring=[f"{x} <- {y}" for x, y in wiring], simulations=d.sims, seconds=round(time.time() - t0, 1),
                   lines=sorted({l for x in suspects for l in x["lines"]}),
@@ -619,11 +610,6 @@ def format_block(result: dict, src: str) -> str:
     if not sus:
         return ""
     code = src.splitlines()
-    if not result.get("forced", True):
-        out = ["A separate localizer predicted what the signals on the failing path should be (the prediction was "
-               "NOT checked in simulation, so these are UNCONFIRMED hints), then walked the dependency graph back "
-               "to the first signal that is wrong while its inputs are right:"]
-        return _suspect_lines(out, sus, code)
     how = (f"a forced prediction made the failing check pass (round {result['rounds']}), and only the changes "
            f"the check needs were kept" if result["accepted"] else
            "no prediction made the failing check pass, so these are UNCONFIRMED hints")
@@ -635,8 +621,7 @@ def format_block(result: dict, src: str) -> str:
 
 def _suspect_lines(out: list, sus: list, code: list) -> str:
     notes = {True: "forcing only this signal makes the failing check pass",
-             False: "forcing only this signal is not enough on its own", None: "output port",
-             "unchecked": "not checked in simulation"}
+             False: "forcing only this signal is not enough on its own", None: "output port"}
     for x in sorted(sus, key=lambda x: x["confirmed"] is not True):
         out.append(f"- {x['signal']} at c{x['cycle']}: is {x['actual']}, should be {x['expected']} ({notes[x['confirmed']]}"
                    + ("; already wrong at the start of the window, the origin may be earlier" if x["early"] else "") + ")")
