@@ -141,24 +141,7 @@ prints the pass rate.
 
 ---
 
-## Reproducing the paper results
-
-### Setup used in the paper
-
-| Setting | Value |
-|---|---|
-| Benchmark | Extended MEIC: 194 bugs (113 syntax, 81 functional) across 15 RTLLM designs, in `testset/MEIC_Testset/` |
-| Debug Agent | `Qwen/Qwen3-Coder-30B-A3B-Instruct` on vLLM with prefix caching, 2 × A6000 |
-| Debug Agent sampling | temperature 0.2, top-p 0.9, repetition penalty 1.1, up to 16,384 output tokens |
-| Localizer Agent | `Qwen/Qwen3-8B` on vLLM, 1 × A6000; temperature 0.7, top-p 0.95, top-k 20, up to 1,024 output tokens |
-| Localizer rounds (N) | 4 |
-| Iteration budget | 3 and 10 repair iterations per bug |
-| Metric | Fix rate (FR): fraction of bugs whose final RTL passes **all** testbench checks |
-
-All of these are the defaults in `config.yaml`, so no edits are needed apart from the GPU and
-cache settings above.
-
-### Run the full benchmark
+## Run the full benchmark
 
 [`run_MEIC_batch.sh`](run_MEIC_batch.sh) runs the agent on every buggy file in
 `testset/MEIC_Testset/`. It starts one shared vLLM server for the whole batch and stops it at the
@@ -167,13 +150,7 @@ end. The full pipeline (waveform analysis and localizer) is on by default.
 **3 iterations** (Table I, row "RTLDetective, 3 iter."):
 
 ```bash
-./run_MEIC_batch.sh --max-loops 3 --seed 0 --output-dir output/rtldetective_L3
-```
-
-**10 iterations** (Table I, row "RTLDetective, 10 iter."):
-
-```bash
-./run_MEIC_batch.sh --max-loops 10 --seed 0 --output-dir output/rtldetective_L10
+./run_MEIC_batch.sh --max-loops 3 --seed 0 --output-dir output/rtldetective
 ```
 
 Useful options:
@@ -189,27 +166,7 @@ Useful options:
 Each bug produces `output/<run>/<design>/<bug>_report.json`, `<bug>_log.txt` and `<bug>_fixed.v`.
 The script prints the number of fixed bugs at the end.
 
-### Compute the fix rate
-
-Bug files are named `<design>_syn_*` (syntax) or `<design>_func_*` (functional). This prints the
-fix rate per category, as in Table I:
-
-```bash
-python3 - output/rtldetective_L3 <<'EOF'
-import glob, json, os, sys
-c = {"syn": [0, 0], "func": [0, 0]}
-for f in glob.glob(f"{sys.argv[1]}/*/*_report.json"):
-    kind = "func" if "_func_" in os.path.basename(f) else "syn"
-    c[kind][1] += 1
-    c[kind][0] += bool(json.load(open(f)).get("evaluation", {}).get("all_pass"))
-fixed, total = sum(v[0] for v in c.values()), sum(v[1] for v in c.values())
-for k, (a, n) in c.items():
-    print(f"{k:5s} {a}/{n}  FR = {100*a/max(n,1):.1f}%")
-print(f"total {fixed}/{total}  FR = {100*fixed/max(total,1):.1f}%")
-EOF
-```
-
-### Expected results (Table I of the paper)
+### Paper Results (Table I of the paper)
 
 | Method | Budget | Syntax FR | Functional FR | Overall |
 |---|---|---|---|---|
@@ -219,13 +176,6 @@ EOF
 | MEIC | 10 iter. | 74.3% | 69.1% | 140/194 (72.2%) |
 | **RTLDetective** | 3 iter. | 87.6% | 71.6% | 157/194 (80.9%) |
 | **RTLDetective** | 10 iter. | **93.8%** | **74.1%** | **167/194 (86.1%)** |
-
-LLM sampling on GPUs is not fully deterministic, so expect small differences (a few bugs) from
-run to run, even with the same seed.
-
-The baseline rows (no agent, UVLLM, MEIC) were produced with the baselines' own code, set up
-to use the same Qwen3-Coder-30B-A3B model and sampling settings. That code is not included in
-this repository.
 
 ---
 
