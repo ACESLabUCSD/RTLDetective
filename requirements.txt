@@ -1,0 +1,10 @@
+requests>=2.31.0
+pyyaml>=6.0.1
+pyverilog
+matplotlib
+networkx
+# Optional — only needed for local model inference (./run.sh install-local)
+# torch>=2.1.0
+# transformers>=4.45.0
+# accelerate>=0.30.0
+# vllm>=0.20.0        # optional faster local backend (./run.sh install-vllm)

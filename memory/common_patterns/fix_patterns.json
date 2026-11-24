@@ -1,0 +1,133 @@
+{
+    "patterns": [
+        {
+            "name": "blocking_to_nonblocking",
+            "category": "assignment",
+            "trigger": "blocking assignment in sequential always block",
+            "regex_detect": "always\\s*@\\s*\\(\\s*posedge.*?\\bbegin\\b(.*?)\\bend\\b",
+            "description": "Replace '=' with '<=' for all signal assignments inside edge-triggered always blocks",
+            "example_before": "always @(posedge clk) begin\n    q = d;\nend",
+            "example_after": "always @(posedge clk) begin\n    q <= d;\nend"
+        },
+        {
+            "name": "add_default_case",
+            "category": "case_statement",
+            "trigger": "case statement without default branch",
+            "description": "Add a default branch to prevent latch inference",
+            "example_before": "case (sel)\n    2'b00: out = a;\n    2'b01: out = b;\nendcase",
+            "example_after": "case (sel)\n    2'b00: out = a;\n    2'b01: out = b;\n    default: out = 0;\nendcase"
+        },
+        {
+            "name": "fix_sensitivity_list",
+            "category": "sensitivity",
+            "trigger": "manual sensitivity list in combinational logic",
+            "description": "Replace manual sensitivity list with @(*) for combinational blocks",
+            "example_before": "always @(a or b) begin",
+            "example_after": "always @(*) begin"
+        },
+        {
+            "name": "add_async_reset",
+            "category": "reset",
+            "trigger": "sequential block missing async reset in sensitivity",
+            "description": "Add posedge rst to sensitivity list for asynchronous reset",
+            "example_before": "always @(posedge clk) begin\n    if (rst) q <= 0;",
+            "example_after": "always @(posedge clk or posedge rst) begin\n    if (rst) q <= 0;"
+        },
+        {
+            "name": "fix_width_mismatch",
+            "category": "width",
+            "trigger": "assignment between signals of different widths",
+            "description": "Add explicit bit-select or extension to match widths",
+            "example_before": "wire [3:0] narrow;\nassign narrow = wide_8bit;",
+            "example_after": "wire [3:0] narrow;\nassign narrow = wide_8bit[3:0];"
+        },
+        {
+            "name": "remove_multiple_drivers",
+            "category": "driver",
+            "trigger": "signal driven by multiple always blocks",
+            "description": "Consolidate all assignments to the signal into a single always block",
+            "example_before": "always @(posedge clk) q <= d1;\nalways @(posedge clk) q <= d2;",
+            "example_after": "always @(posedge clk) begin\n    if (sel) q <= d1;\n    else     q <= d2;\nend"
+        },
+        {
+            "name": "add_else_branch",
+            "category": "latch",
+            "trigger": "if without else in combinational always block",
+            "description": "Add else branch or pre-assign default to prevent latch inference",
+            "example_before": "always @(*) begin\n    if (en) out = data;\nend",
+            "example_after": "always @(*) begin\n    out = 0;  // default\n    if (en) out = data;\nend"
+        },
+        {
+            "name": "fix_operator_misuse",
+            "category": "operator",
+            "trigger": "assignment operator = used in conditional where comparison == intended",
+            "description": "Replace = with == in if/case/while conditions",
+            "example_before": "if (a = 2'b10) b <= 1'b1;",
+            "example_after": "if (a == 2'b10) b <= 1'b1;"
+        },
+        {
+            "name": "fix_literal_radix",
+            "category": "literal",
+            "trigger": "bare integer used where sized binary/hex literal intended",
+            "description": "Add explicit width and radix to literal",
+            "example_before": "if (a == 10)",
+            "example_after": "if (a == 2'b10)"
+        },
+        {
+            "name": "fix_data_type",
+            "category": "type",
+            "trigger": "continuous assign to reg or procedural assign to wire",
+            "description": "Change signal type to match assignment context",
+            "example_before": "reg a;\nassign a = b;",
+            "example_after": "wire a;\nassign a = b;"
+        },
+        {
+            "name": "fix_module_name_typo",
+            "category": "instantiation",
+            "trigger": "instantiated module name does not match any defined module",
+            "description": "Correct the module name to match the definition",
+            "example_before": "mdo u1 (.a(x), .b(y));",
+            "example_after": "mod u1 (.a(x), .b(y));"
+        },
+        {
+            "name": "fix_missing_port",
+            "category": "instantiation",
+            "trigger": "module instantiation missing one or more port connections",
+            "description": "Add missing port connections to instantiation",
+            "example_before": "mod u1 (.a(x), .b(y));",
+            "example_after": "mod u1 (.a(x), .b(y), .c(z));"
+        },
+        {
+            "name": "fix_port_name_mismatch",
+            "category": "instantiation",
+            "trigger": "named port in instantiation does not match module definition",
+            "description": "Use exact port names from the module definition",
+            "example_before": "mod u1 (.din(data));",
+            "example_after": "mod u1 (.data_in(data));"
+        },
+        {
+            "name": "positional_to_named_ports",
+            "category": "instantiation",
+            "trigger": "positional port connection with potential order mismatch",
+            "description": "Convert positional to named port connections to prevent order errors",
+            "example_before": "mod u1 (sig_b, sig_a, sig_c);",
+            "example_after": "mod u1 (.a(sig_a), .b(sig_b), .c(sig_c));"
+        },
+        {
+            "name": "fix_precedence_error",
+            "category": "expression",
+            "trigger": "bitwise operator where logical operator intended, or missing parentheses",
+            "description": "Use && || for boolean logic, add parentheses around comparisons",
+            "example_before": "assign z = result == 0 & carry == 0;",
+            "example_after": "assign z = (result == 0) && (carry == 0);"
+        },
+        {
+            "name": "fix_infinite_loop",
+            "category": "loop",
+            "trigger": "forever/while/for without termination or FSM deadlock state",
+            "description": "Add termination condition or FSM exit transition",
+            "example_before": "ERROR: state <= ERROR;",
+            "example_after": "ERROR: if (clear) state <= IDLE; else state <= ERROR;"
+        }
+    ]
+}

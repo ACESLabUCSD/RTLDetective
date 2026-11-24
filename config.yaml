@@ -1,0 +1,103 @@
+# Verilog Debug Agent Configuration
+
+# OpenRouter API settings
+openrouter:
+  # Set via OPENROUTER_API_KEY environment variable (recommended)
+  # Or uncomment below (not recommended for shared repos):
+  # api_key: "sk-or-..."
+  default_model: "anthropic/claude-sonnet-4"
+  temperature: 0.2
+  max_tokens: 4096
+
+# Available model shortcuts
+models:
+  # Remote (OpenRouter)
+  claude-sonnet: "anthropic/claude-sonnet-4"
+  claude-haiku: "anthropic/claude-3.5-haiku"
+  gpt-4o: "openai/gpt-4o"
+  gpt-4o-mini: "openai/gpt-4o-mini"
+  deepseek-chat: "deepseek/deepseek-chat"
+  llama-70b: "meta-llama/llama-3.1-70b-instruct"
+  gemini-pro: "google/gemini-2.0-flash-001"
+  # Local (HuggingFace — no API key needed)
+  qwen-coder-30b: "local/Qwen/Qwen3-Coder-30B-A3B-Instruct"
+  qwen-coder-next: "local/Qwen/Qwen3-Coder-Next"
+
+# Local model settings
+local_model:
+  default: "Qwen/Qwen3-Coder-30B-A3B-Instruct"
+  cache_dir: "~/.cache/verilog_debug_models"   # where model weights are downloaded
+  torch_dtype: "auto"  # auto, float16, bfloat16, float32
+  device: "auto"        # auto, cpu, cuda, cuda:0
+  gpu_ids: "0,1,2"        # which GPUs to use (comma-separated); empty = all visible
+
+# vLLM settings (used with --backend vllm).
+# The agent talks to one shared `vllm serve --enable-prefix-caching` server over
+# HTTP; the first agent run starts it in the background and later runs reuse it
+# (and its prefix cache). Manage it with: python -m agent.backends.vllm_server start|status|stop
+# cache_dir, torch_dtype and gpu_ids above are shared with the HF backend.
+vllm:
+  host: 127.0.0.1
+  port: 8000
+  startup_timeout_s: 1800         # how long an agent waits for the server to come up
+  # Sampling — sent with every request, so changes apply on the next run
+  # (no server restart needed).
+  temperature: 0.2                # 0 = greedy (top_p is then ignored)
+  top_p: 0.9
+  repetition_penalty: 1.1
+  seed: 0                         # per-request sampling seed (null = random)
+  max_new_tokens: 16384           # max tokens per reply (prompt + reply must fit max_model_len)
+  # Server — read when the server starts; stop it after changing these.
+  tensor_parallel_size: null      # null = largest power of 2 <= number of gpu_ids
+  gpu_memory_utilization: 0.85    # fraction of EACH GPU's total memory vLLM pre-allocates;
+                                  # must actually be free, so lower it on shared GPUs.
+  max_model_len: 131072           # context length; KV cache must fit this (model max is 262144)
+  enforce_eager: false            # true = skip CUDA graphs (slower, less memory, faster startup)
+
+# Predict-and-force localizer (--localize): after a failed iteration a small model predicts the failing
+# path's signal values, they are forced into the simulation (up to `rounds` tries). It has its own vLLM server.
+localizer:
+  model: Qwen/Qwen3-8B
+  port: 8001
+  gpu_ids: "2"                    # GPUs 0,1 are taken by the main server
+  gpu_memory_utilization: 0.6     # of GPU 2; must actually be free
+  max_model_len: 16384
+  rounds: 4                       # predict -> force -> feedback tries (N)
+  window: 4                       # cycles to predict, ending at the first failing check
+  max_signals: 10                 # signals on the failing path to predict
+  temperature: 0.7
+
+# Paths (relative to project root)
+paths:
+  samples_buggy: "samples/buggy"
+  samples_benchmarks: "samples/benchmarks"
+  memory: "memory"
+  skills: "skills"
+  output: "output"
+
+# Static analyzer settings
+analyzer:
+  enabled: true
+  checks:
+    - blocking_nonblocking
+    - sensitivity_list
+    - incomplete_case
+    - multiple_drivers
+    - width_mismatch
+    - latch_inference
+
+# Simulation settings
+simulation:
+  enabled: true
+  simulator: "iverilog"  # iverilog or verilator
+  timeout: 30
+  auto_testbench: true
+
+# Multi-loop debugging
+agent:
+  max_loops: 3  # max iterative refinement passes (1 = single-shot)
+
+# Evaluation settings
+evaluation:
+  metric: "testbench_pass_rate"  # primary: all testbench assertions must pass
+  timeout: 30                     # seconds per simulation

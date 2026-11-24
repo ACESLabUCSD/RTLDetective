@@ -1,0 +1,52 @@
+# ── Secrets / environment ────────────────────────────────────────────
+.env
+# Python virtual environment created by ./run.sh install
+verilog_debug/
+.venv/
+venv/
+
+# ── Python ───────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+
+# PLY / Pyverilog parser tables, regenerated on every run
+parser.out
+parsetab.py
+
+# ── RTLDetective outputs ─────────────────────────────────────────────
+output/
+logs/
+*.log
+*_report.json
+*_prompts.jsonl
+*_iter[0-9]*.v
+
+# ── Baseline outputs (MEIC, UVLLM, bare LLM) ─────────────────────────
+baselines/**/output/
+baselines/**/results/
+baselines/**/logs/
+baselines/reproduce-UVLLM-DAC-25/workdir/
+baselines/reproduce-UVLLM-DAC-25/MEIC/*/0_preprocess/
+baselines/reproduce-UVLLM-DAC-25/MEIC/*/1_mismatch/
+baselines/reproduce-UVLLM-DAC-25/MEIC/*/2_SuspiciousLine/
+baselines/reproduce-UVLLM-DAC-25/MEIC/*/test.txt
+baselines/reproduce-MEIC-ICCAD-24/Framework/*.csv
+*.out
+
+# ── Simulation artifacts ─────────────────────────────────────────────
+*.vvp
+*.vcd
+*.fst
+*.ghw
+a.out
+transcript
+work/
+
+# ── Editors / OS ─────────────────────────────────────────────────────
+.vscode/
+.idea/
+.claude/
+.DS_Store
+Thumbs.db
