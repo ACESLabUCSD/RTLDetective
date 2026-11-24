@@ -6,14 +6,13 @@ Neusha Javidnia, Ruisi Zhang, Farinaz Koushanfar
 
 RTLDetective finds and fixes functional and syntax bugs in Verilog RTL using a moderately sized,
 locally hosted open-weight LLM. It needs no fine-tuning and no golden reference model. Instead
-of only reasoning over code and traces, it **tests its hypotheses in simulation**: a small
-*Localizer Agent* predicts what internal signals should be, RTLDetective forces those values into
+of only reasoning over code and traces, it tests its hypotheses in simulation: a small
+**Localizer Agent** predicts what internal signals should be, RTLDetective forces those values into
 the simulation to see whether the failure goes away, and the confirmed root cause is handed to a
-*Debug Agent* that writes the repair.
+**Debug Agent** that writes the repair.
 
 On the MEIC benchmark (194 bugs), RTLDetective fixes **86.1%** of the bugs, **13.9 points** above
-the best baseline, with every method using the same Qwen3-Coder-30B-A3B model. With three
-iterations it already beats the best baseline's ten-iteration result.
+the best baseline, with every method using the same Qwen3-Coder-30B-A3B model. 
 
 ![RTLDetective overview](docs/figure1_overview.png)
 
@@ -42,12 +41,12 @@ Each repair iteration runs the steps below. The links point to where each one is
 
 | Step | What it does | Code |
 |---|---|---|
-| Compile, simulate, lint | Compiles with Icarus Verilog, runs the testbench, and applies 8 rule-based checks for common RTL bug patterns (blocking assignments in sequential blocks, incomplete sensitivity lists, missing `default`, latches, width mismatches, ...) | [`tools/benchmark_runner.py`](tools/benchmark_runner.py), [`tools/static_analyzer.py`](tools/static_analyzer.py) |
+| Compile, simulate, lint | Compiles with Icarus Verilog, runs the testbench, and applies 8 rule-based checks for common RTL bug patterns | [`tools/benchmark_runner.py`](tools/benchmark_runner.py), [`tools/static_analyzer.py`](tools/static_analyzer.py) |
 | Dependency graph | Builds a hierarchical signal dependency graph across module boundaries and traces each failing output back to its drivers | [`agent/verilog_tracer.py`](agent/verilog_tracer.py) |
 | Waveform analysis | Reduces the VCD to a compact per-cycle table of the signals on those paths, from the last passing check to the first failing one | [`agent/waveform.py`](agent/waveform.py) |
-| Counterfactual fault localization | The Localizer Agent predicts the expected values of intermediate signals. RTLDetective forces them with `force`/`release` and re-simulates, refining for up to N rounds. The first signal that is wrong while its inputs are right is the root-cause candidate, confirmed by forcing it alone | [`agent/predict_force.py`](agent/predict_force.py) |
-| Knowledge-guided repair | The Debug Agent gets the spec, code, logs, waveform table and suspicious lines, plus a curated knowledge base (about 29 KB) of RTL bug and fix patterns, and writes a bug report and the repaired RTL | [`agent/debug_agent.py`](agent/debug_agent.py), [`memory/`](memory/), [`skills/SKILL.md`](skills/SKILL.md) |
-| Rollback | Scores each candidate by compilation and testbench pass rate and keeps the best version seen so far, so a bad repair never makes things worse | [`agent/debug_agent.py`](agent/debug_agent.py) |
+| Counterfactual fault localization | The Localizer Agent predicts the expected values of intermediate signals. RTLDetective forces them with `force`/`release` and re-simulates, refining for up to N rounds. | [`agent/predict_force.py`](agent/predict_force.py) |
+| Knowledge-guided repair | The Debug Agent gets the spec, code, logs, waveform table and suspicious lines, plus a curated knowledge base (about 29 KB) of RTL bug and fix patterns.| [`agent/debug_agent.py`](agent/debug_agent.py), [`memory/`](memory/), [`skills/SKILL.md`](skills/SKILL.md) |
+| Rollback | Scores each candidate by compilation and testbench pass rate and keeps the best version seen so far. | [`agent/debug_agent.py`](agent/debug_agent.py) |
 
 The conversation is kept across iterations and served by vLLM with prefix caching, so the shared
 prompt (knowledge base and earlier attempts) is not recomputed on every call.
@@ -84,9 +83,6 @@ sudo apt install iverilog
 iverilog -V | head -1
 ```
 
-Older distributions ship older versions. To match the paper, build 13.0 from source
-([instructions](https://steveicarus.github.io/iverilog/usage/installation.html)).
-
 ### 3. Create the Python environment
 
 This creates a virtual environment in `./verilog_debug/` and installs `requirements.txt`, vLLM,
@@ -116,10 +112,6 @@ The relevant settings in [`config.yaml`](config.yaml):
 | `vllm.gpu_memory_utilization` | `0.85` | Share of each Debug Agent GPU that vLLM reserves |
 | `localizer.gpu_memory_utilization` | `0.6` | Share of the Localizer GPU that vLLM reserves |
 
-With a different GPU layout, give the Debug Agent enough GPUs for about 61 GB of weights plus the
-KV cache, and give the Localizer Agent a GPU of its own. If the KV cache does not fit, lower
-`vllm.max_model_len` (131,072 tokens by default). If the GPUs are shared with other jobs, lower
-the `gpu_memory_utilization` values, since that memory must actually be free.
 
 ## Quick start
 
@@ -142,7 +134,7 @@ folder. The output folder then contains:
 | `<bug>_fixed.v` | The repaired RTL (the best version found) |
 | `report_<bug>_<time>.json` | Final pass rate, whether all tests pass, the best iteration and rollbacks, and for each iteration the testbench result, localizer result, latency and token usage. Use `--output FILE` to choose the name |
 
-Two commands that need no GPU, useful for checking the setup:
+Two commands useful for checking the setup:
 
 ```bash
 ./run.sh lint testset/MEIC_Testset/accu/buggy/accu_func_logic_error.v
@@ -243,50 +235,4 @@ RTLDetective/
 └── docs/                   # Figures
 ```
 
-Everything the agent produces goes to `output/` and `logs/`, which are not tracked by git.
-
-## Troubleshooting
-
-**Checking or stopping the vLLM servers.** The batch script stops the Debug Agent's server when it
-finishes. The Localizer Agent's server (port 8001) keeps running. Server logs are in `logs/`.
-
-Check the Debug Agent's server:
-
-```bash
-python -m agent.backends.vllm_server status
-```
-
-Stop it:
-
-```bash
-python -m agent.backends.vllm_server stop
-```
-
-Stop the Localizer Agent's server:
-
-```bash
-kill -- -"$(cat logs/vllm_server_8001.pid)"
-```
-
-**The server does not start or runs out of memory.** Check that the GPUs in `config.yaml` are free
-(`nvidia-smi`), lower `gpu_memory_utilization`, or lower `vllm.max_model_len`. The last lines of the server log are printed when startup fails.
-
-**`iverilog: command not found`.** Icarus Verilog is not installed or not on `PATH`. See
-[step 2](#2-install-icarus-verilog).
-
-## Citation
-
-If you use RTLDetective, please cite:
-
-```bibtex
-@article{javidnia2026rtldetective,
-  title   = {{RTLDetective}: Agentic {RTL} Debugging through Dataflow Analysis and
-             Simulation-Guided Fault Localization},
-  author  = {Javidnia, Neusha and Zhang, Ruisi and Koushanfar, Farinaz},
-  year    = {2026}
-}
-```
-
-## Contact
-
-Neusha Javidnia, njavidnia@ucsd.edu
+Everything the agent produces goes to `output/` and `logs/`.
