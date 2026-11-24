@@ -2,7 +2,7 @@
 
 **Agentic RTL Debugging through Dataflow Analysis and Simulation-Guided Fault Localization**
 
-Neusha Javidnia, Ruisi Zhang, Farinaz Koushanfar. ECE Department, UC San Diego
+Neusha Javidnia, Ruisi Zhang, Farinaz Koushanfar
 
 RTLDetective is a multi-agent framework for automated RTL debugging and repair. It builds a
 signal dependency graph from the RTL, extracts failure context from waveform traces, and uses a
