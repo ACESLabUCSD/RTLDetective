@@ -57,12 +57,6 @@ git clone https://github.com/ACESLabUCSD/RTLDetective.git
 cd RTLDetective
 ```
 
-The UVLLM baseline uses Strider as a git submodule. Pull it only if you need that baseline:
-
-```bash
-git submodule update --init --recursive
-```
-
 ### 2. Install Icarus Verilog
 
 Version 13.0 was used in the paper. Some distributions ship older versions. You can build
@@ -229,15 +223,9 @@ EOF
 LLM sampling on GPUs is not fully deterministic, so expect small differences (a few bugs) from
 run to run, even with the same seed.
 
-### Baselines
-
-The baseline implementations used for comparison are in [`baselines/`](baselines/):
-
-- `baselines/bare_llm/`: the single-call "no agent" baseline.
-- `baselines/reproduce-MEIC-ICCAD-24/`: MEIC, adapted to call the same vLLM server.
-- `baselines/reproduce-UVLLM-DAC-25/`: UVLLM, adapted to call the same vLLM server.
-
-See the README in each folder for how it is set up.
+The baseline rows (no agent, UVLLM, MEIC) were produced with the baselines' own code, set up
+to use the same Qwen3-Coder-30B-A3B model and sampling settings. That code is not included in
+this repository.
 
 ---
 
@@ -271,7 +259,6 @@ RTLDetective/
 │   └── ACES/                 # Larger multi-file designs (e.g. xge_mac)
 ├── samples/                  # Small example bugs and testbenches
 ├── scripts/                  # Batch runner and report evaluation helpers
-├── baselines/                # No-agent, MEIC and UVLLM baselines
 └── docs/figure1_overview.png
 ```
 

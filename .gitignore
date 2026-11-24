@@ -23,16 +23,8 @@ logs/
 *_prompts.jsonl
 *_iter[0-9]*.v
 
-# ── Baseline outputs (MEIC, UVLLM, bare LLM) ─────────────────────────
-baselines/**/output/
-baselines/**/results/
-baselines/**/logs/
-baselines/reproduce-UVLLM-DAC-25/workdir/
-baselines/reproduce-UVLLM-DAC-25/MEIC/*/0_preprocess/
-baselines/reproduce-UVLLM-DAC-25/MEIC/*/1_mismatch/
-baselines/reproduce-UVLLM-DAC-25/MEIC/*/2_SuspiciousLine/
-baselines/reproduce-UVLLM-DAC-25/MEIC/*/test.txt
-baselines/reproduce-MEIC-ICCAD-24/Framework/*.csv
+# ── Baselines (MEIC, UVLLM, bare LLM): kept locally, not published ──
+baselines/
 *.out
 
 # ── Simulation artifacts ─────────────────────────────────────────────
