@@ -4,15 +4,16 @@
 
 Neusha Javidnia, Ruisi Zhang, Farinaz Koushanfar
 
-RTLDetective is a multi-agent framework for automated RTL debugging and repair. It builds a
-signal dependency graph from the RTL, extracts failure context from waveform traces, and uses a
-lightweight **Localizer Agent** to predict the values that internal signals should have. It then
-tests those predictions by forcing them in simulation. A **Debug Agent** combines the localized
-faults with static analysis, a curated knowledge base of RTL bug patterns and the design
-specification to generate repairs. The repairs are checked with the testbench.
+RTLDetective finds and fixes functional and syntax bugs in Verilog RTL using a moderately sized,
+locally hosted open-weight LLM. It needs no fine-tuning and no golden reference model. Instead
+of only reasoning over code and traces, it **tests its hypotheses in simulation**: a small
+*Localizer Agent* predicts what internal signals should be, RTLDetective forces those values into
+the simulation to see whether the failure goes away, and the confirmed root cause is handed to a
+*Debug Agent* that writes the repair.
 
-On the MEIC benchmark (194 bugs), RTLDetective reaches an **86.1% fix rate**, 13.9 percentage
-points above the best baseline, using the same open-weight 30B model as the baselines.
+On the MEIC benchmark (194 bugs), RTLDetective fixes **86.1%** of the bugs, **13.9 points** above
+the best baseline, with every method using the same Qwen3-Coder-30B-A3B model. With three
+iterations it already beats the best baseline's ten-iteration result.
 
 ![RTLDetective overview](docs/figure1_overview.png)
 
@@ -22,46 +23,58 @@ traces dependencies backward from failing outputs, and summarizes the waveforms 
 first failure. The Localizer Agent predicts expected values of intermediate signals and tests them
 through counterfactual simulation. Root Cause Analysis uses the validated predictions to find
 suspicious logic. The Debug Agent uses the localized fault information and the RTL debugging
-knowledge base to generate the next repair candidate. A rollback gate keeps the best version
-found so far.*
-
----
+knowledge base to generate the next repair candidate.*
 
 ## Contents
 
+- [How it works](#how-it-works)
 - [Installation](#installation)
 - [Quick start](#quick-start)
-- [Reproducing the paper results](#reproducing-the-paper-results)
-- [Repository layout](#repository-layout)
+- [Run the full benchmark](#run-the-full-benchmark)
 - [Configuration](#configuration)
-- [Other backends](#other-backends)
+- [Repository layout](#repository-layout)
+- [Troubleshooting](#troubleshooting)
 - [Citation](#citation)
 
----
+## How it works
+
+Each repair iteration runs the steps below. The links point to where each one is implemented.
+
+| Step | What it does | Code |
+|---|---|---|
+| Compile, simulate, lint | Compiles with Icarus Verilog, runs the testbench, and applies 8 rule-based checks for common RTL bug patterns (blocking assignments in sequential blocks, incomplete sensitivity lists, missing `default`, latches, width mismatches, ...) | [`tools/benchmark_runner.py`](tools/benchmark_runner.py), [`tools/static_analyzer.py`](tools/static_analyzer.py) |
+| Dependency graph | Builds a hierarchical signal dependency graph across module boundaries and traces each failing output back to its drivers | [`agent/verilog_tracer.py`](agent/verilog_tracer.py) |
+| Waveform analysis | Reduces the VCD to a compact per-cycle table of the signals on those paths, from the last passing check to the first failing one | [`agent/waveform.py`](agent/waveform.py) |
+| Counterfactual fault localization | The Localizer Agent predicts the expected values of intermediate signals. RTLDetective forces them with `force`/`release` and re-simulates, refining for up to N rounds. The first signal that is wrong while its inputs are right is the root-cause candidate, confirmed by forcing it alone | [`agent/predict_force.py`](agent/predict_force.py) |
+| Knowledge-guided repair | The Debug Agent gets the spec, code, logs, waveform table and suspicious lines, plus a curated knowledge base (about 29 KB) of RTL bug and fix patterns, and writes a bug report and the repaired RTL | [`agent/debug_agent.py`](agent/debug_agent.py), [`memory/`](memory/), [`skills/SKILL.md`](skills/SKILL.md) |
+| Rollback | Scores each candidate by compilation and testbench pass rate and keeps the best version seen so far, so a bad repair never makes things worse | [`agent/debug_agent.py`](agent/debug_agent.py) |
+
+The conversation is kept across iterations and served by vLLM with prefix caching, so the shared
+prompt (knowledge base and earlier attempts) is not recomputed on every call.
 
 ## Installation
 
 ### Requirements
 
-| Component | Version / notes |
-|---|---|
-| OS | Linux (tested on Ubuntu) |
-| Python | 3.10 or newer |
-| Simulator | [Icarus Verilog](https://steveicarus.github.io/iverilog/) 13.0 (`iverilog`, `vvp`) |
-| GPUs (paper setup) | 3 × NVIDIA RTX A6000 (48 GB): two for the Debug Agent, one for the Localizer Agent |
+- **Linux** with Python 3.10 or newer.
+- **[Icarus Verilog](https://steveicarus.github.io/iverilog/)**. The paper used version 13.0.
+- **GPUs.** The paper used three NVIDIA RTX A6000 (48 GB) GPUs: two for the Debug Agent
+  (Qwen3-Coder-30B-A3B, about 61 GB of weights) and one for the Localizer Agent (Qwen3-8B). The
+  default `config.yaml` assumes exactly this layout. See [step 4](#4-match-the-config-to-your-gpus)
+  for other setups.
+- **Disk.** About 80 GB for the two models.
 
 ### 1. Clone
 
 ```bash
 git clone https://github.com/ACESLabUCSD/RTLDetective.git
+```
+
+```bash
 cd RTLDetective
 ```
 
 ### 2. Install Icarus Verilog
-
-Version 13.0 was used in the paper. Some distributions ship older versions. You can build
-it from source ([instructions](https://steveicarus.github.io/iverilog/usage/installation.html)) or
-use the package manager:
 
 ```bash
 sudo apt install iverilog
@@ -71,10 +84,13 @@ sudo apt install iverilog
 iverilog -V | head -1
 ```
 
+Older distributions ship older versions. To match the paper, build 13.0 from source
+([instructions](https://steveicarus.github.io/iverilog/usage/installation.html)).
+
 ### 3. Create the Python environment
 
-`run.sh` creates a virtual environment in `./verilog_debug/` and installs the dependencies.
-The paper results use the vLLM backend:
+This creates a virtual environment in `./verilog_debug/` and installs `requirements.txt`, vLLM,
+transformers and accelerate:
 
 ```bash
 ./run.sh install-vllm
@@ -88,26 +104,27 @@ source verilog_debug/bin/activate
 ./run.sh check-env
 ```
 
-This installs `requirements.txt` plus `vllm`, `transformers` and `accelerate`. If you only want
-a remote API model, `./run.sh install` installs the base dependencies (see
-[Other backends](#other-backends)).
+### 4. Match the config to your GPUs
 
-### 4. Point the config at your GPUs
+The relevant settings in [`config.yaml`](config.yaml):
 
-In [`config.yaml`](config.yaml), set:
+| Setting | Default | Meaning |
+|---|---|---|
+| `local_model.cache_dir` | `~/.cache/verilog_debug_models` | Where model weights are downloaded |
+| `local_model.gpu_ids` | `"0,1,2"` | GPUs visible to the Debug Agent's server. It uses tensor parallelism over the largest power of two of them, so GPUs 0 and 1 |
+| `localizer.gpu_ids` | `"2"` | GPU for the Localizer Agent's server |
+| `vllm.gpu_memory_utilization` | `0.85` | Share of each Debug Agent GPU that vLLM reserves |
+| `localizer.gpu_memory_utilization` | `0.6` | Share of the Localizer GPU that vLLM reserves |
 
-- `local_model.cache_dir`: where model weights are downloaded (about 60 GB for Qwen3-Coder-30B-A3B).
-- `local_model.gpu_ids`: GPUs for the Debug Agent's vLLM server (the paper uses `"0,1"`).
-- `localizer.gpu_ids`: GPU for the Localizer Agent's vLLM server (the paper uses `"2"`).
-
-Lower `vllm.gpu_memory_utilization` or `localizer.gpu_memory_utilization` if the GPUs are shared.
-
----
+With a different GPU layout, give the Debug Agent enough GPUs for about 61 GB of weights plus the
+KV cache, and give the Localizer Agent a GPU of its own. If the KV cache does not fit, lower
+`vllm.max_model_len` (131,072 tokens by default). If the GPUs are shared with other jobs, lower
+the `gpu_memory_utilization` values, since that memory must actually be free.
 
 ## Quick start
 
-Debug one buggy MEIC design with the full pipeline (waveform analysis and localizer on). The
-first run starts the vLLM servers and downloads the models, which takes a while.
+Debug one functional bug with the full pipeline. The first run downloads the models and starts
+both vLLM servers, which takes several minutes. Later runs reuse the running servers.
 
 ```bash
 python -m agent.debug_agent testset/MEIC_Testset/accu/buggy/accu_func_logic_error.v \
@@ -117,16 +134,15 @@ python -m agent.debug_agent testset/MEIC_Testset/accu/buggy/accu_func_logic_erro
     --output-dir output/quickstart
 ```
 
-The agent writes a JSON report, a log and the repaired RTL (`*_fixed.v`) to the output folder.
-The design specification (`design_description.txt`) is found automatically next to the module.
+The design specification (`design_description.txt`) is picked up automatically from the design's
+folder. The output folder then contains:
 
-To run all bugs of one design:
+| File | Contents |
+|---|---|
+| `<bug>_fixed.v` | The repaired RTL (the best version found) |
+| `report_<bug>_<time>.json` | Final pass rate, whether all tests pass, the best iteration and rollbacks, and for each iteration the testbench result, localizer result, latency and token usage. Use `--output FILE` to choose the name |
 
-```bash
-./run_MEIC_batch.sh --modules accu --output-dir output/quickstart_accu
-```
-
-Other useful commands:
+Two commands that need no GPU, useful for checking the setup:
 
 ```bash
 ./run.sh lint testset/MEIC_Testset/accu/buggy/accu_func_logic_error.v
@@ -136,35 +152,44 @@ Other useful commands:
 ./run.sh bench testset/MEIC_Testset/accu/buggy/accu_func_logic_error.v testset/MEIC_Testset/accu/benchmarks/tb.v
 ```
 
-The first runs only the rule-based static analyzer (no LLM). The second runs the testbench and
-prints the pass rate.
-
----
+The first runs only the static analyzer. The second runs the testbench on the buggy design and
+prints its pass rate.
 
 ## Run the full benchmark
 
-[`run_MEIC_batch.sh`](run_MEIC_batch.sh) runs the agent on every buggy file in
-`testset/MEIC_Testset/`. It starts one shared vLLM server for the whole batch and stops it at the
-end. The full pipeline (waveform analysis and localizer) is on by default.
+[`testset/MEIC_Testset/`](testset/MEIC_Testset/) is the extended MEIC benchmark: 194 buggy
+instances (113 syntax, 81 functional) across 15 RTLLM designs. Each design folder has:
 
-**3 iterations** (Table I, row "RTLDetective, 3 iter."):
+```
+<design>/
+├── design_description.txt   # natural-language specification
+├── <design>.v               # reference implementation
+├── benchmarks/tb.v          # self-checking testbench
+└── buggy/<design>_{syn,func}_<bug>.v
+```
+
+A bug counts as **fixed** only when the final RTL passes **all** testbench checks.
+
+[`run_MEIC_batch.sh`](run_MEIC_batch.sh) runs the full pipeline on every buggy file, one at a
+time (vLLM backend, waveform analysis and localizer on). With 3 iterations per bug (Table I, row
+"RTLDetective, 3 iter."):
 
 ```bash
 ./run_MEIC_batch.sh --max-loops 3 --seed 0 --output-dir output/rtldetective
 ```
 
-Useful options:
+Each bug produces `<output-dir>/<design>/<bug>_report.json`, `<bug>_log.txt` and `<bug>_fixed.v`.
+The script prints the number of fixed bugs at the end. If a run is interrupted, rerun the same
+command with `--resume` to skip bugs that already have a report.
 
 | Option | Effect |
 |---|---|
-| `--modules accu alu` | Run only some designs |
-| `--resume` | Skip bugs that already have a report (to continue an interrupted run) |
-| `--seed N` | Base sampling seed |
-| `--timeout S` | Per-bug timeout in seconds (default 3600) |
-| `--save-prompts` | Also save every LLM request and reply |
-
-Each bug produces `output/<run>/<design>/<bug>_report.json`, `<bug>_log.txt` and `<bug>_fixed.v`.
-The script prints the number of fixed bugs at the end.
+| `--max-loops N` | Repair iterations per bug (default 3) |
+| `--seed N` | Base sampling seed. Each request uses seed + request number |
+| `--modules accu alu` | Run only these designs |
+| `--resume` | Skip bugs that already have a report |
+| `--timeout S` | Per-bug time limit in seconds (default 3600) |
+| `--save-prompts` | Also save every LLM request and reply to `<bug>_prompts.jsonl` |
 
 ### Paper Results (Table I of the paper)
 
@@ -177,78 +202,77 @@ The script prints the number of fixed bugs at the end.
 | **RTLDetective** | 3 iter. | 87.6% | 71.6% | 157/194 (80.9%) |
 | **RTLDetective** | 10 iter. | **93.8%** | **74.1%** | **167/194 (86.1%)** |
 
----
+## Configuration
+
+[`config.yaml`](config.yaml) controls the models and servers:
+
+- **`vllm:`** Debug Agent server: port (8000), sampling (temperature, top-p, repetition penalty,
+  seed, max tokens), tensor parallelism and context length. Sampling changes take effect on the next
+  request. Server changes take effect after a restart.
+- **`localizer:`** Localizer Agent: model, port (8001), GPU, number of predict-and-force rounds
+  (`rounds`), cycle window (`window`) and number of signals to predict (`max_signals`).
+- **`agent.max_loops`:** default number of repair iterations.
+- **`simulation:`, `evaluation:`:** simulator and timeouts.
+
+The same agent can also run on HuggingFace transformers (`--backend hf`, installed with
+`./run.sh install-local`) or on remote models through OpenRouter (`--backend openrouter`, after
+copying `.env.example` to `.env` and setting `OPENROUTER_API_KEY`). `./run.sh models` lists the
+model shortcuts. The paper's results were produced with the vLLM backend only.
 
 ## Repository layout
 
 ```
 RTLDetective/
-├── run.sh                    # Convenience wrapper: install, check-env, debug, meic, lint, bench, ...
-├── run_MEIC_batch.sh         # Runs the agent on the whole MEIC benchmark
-├── config.yaml               # Models, vLLM servers, localizer, sampling, simulator settings
-├── requirements.txt
-│
+├── run_MEIC_batch.sh       # Runs the full benchmark
+├── run.sh                  # Helper: install, check-env, lint, bench, debug, models, ...
+├── config.yaml             # Models, vLLM servers, localizer and simulator settings
 ├── agent/
-│   ├── debug_agent.py        # Debug Agent: multi-iteration repair loop with rollback
-│   ├── predict_force.py      # Localizer Agent: predict, force and re-simulate, root cause analysis
-│   ├── verilog_tracer.py     # Hierarchical signal dependency graph (Pyverilog)
-│   ├── waveform.py           # VCD analysis: compact transition table of the failure window
-│   ├── memory_loader.py      # Loads the knowledge base into the system prompt
-│   └── backends/             # LLM clients: vLLM (server and client), HuggingFace, OpenRouter
-│
-├── tools/
-│   ├── static_analyzer.py    # Rule-based RTL linter (8 bug-pattern rules)
-│   ├── benchmark_runner.py   # Compiles and simulates with the testbench, scores pass rate
-│   └── test_runner.py
-│
-├── memory/                   # Knowledge base: bug and fix patterns, Verilog references, templates
-├── skills/SKILL.md           # Structured debugging procedure given to the Debug Agent
-│
-├── testset/
-│   ├── MEIC_Testset/         # 15 designs × {spec, testbench, buggy/*.v}: 194 bugs
-│   └── ACES/                 # Larger multi-file designs (e.g. xge_mac)
-├── samples/                  # Small example bugs and testbenches
-├── scripts/                  # Batch runner and report evaluation helpers
-└── docs/figure1_overview.png
+│   ├── debug_agent.py      # Debug Agent: iterative repair loop with rollback
+│   ├── predict_force.py    # Localizer Agent: predict, force, re-simulate, root cause analysis
+│   ├── verilog_tracer.py   # Signal dependency graph (Pyverilog)
+│   ├── waveform.py         # VCD to compact transition table
+│   ├── memory_loader.py    # Loads the knowledge base into the system prompt
+│   └── backends/           # vLLM server and client, HuggingFace and OpenRouter clients
+├── tools/                  # Static analyzer, testbench runner
+├── memory/                 # Knowledge base: bug and fix patterns, Verilog references, templates
+├── skills/SKILL.md         # Debugging procedure given to the Debug Agent
+├── testset/MEIC_Testset/   # Benchmark: 15 designs, 194 bugs
+├── testset/ACES/           # Larger multi-file designs
+├── samples/                # Small example bugs and testbenches
+├── scripts/                # Batch run and report evaluation for samples/
+└── docs/                   # Figures
 ```
 
-Outputs are written to `output/` and are not tracked by git.
+Everything the agent produces goes to `output/` and `logs/`, which are not tracked by git.
 
----
+## Troubleshooting
 
-## Configuration
+**Checking or stopping the vLLM servers.** The batch script stops the Debug Agent's server when it
+finishes. The Localizer Agent's server (port 8001) keeps running. Server logs are in `logs/`.
 
-Most of the behavior is controlled by [`config.yaml`](config.yaml):
+Check the Debug Agent's server:
 
-- `vllm:`: server port, sampling settings (temperature, top-p, seed, max tokens), tensor parallelism
-  and context length for the Debug Agent. Sampling settings apply on the next request. Server
-  settings apply after a restart:
+```bash
+python -m agent.backends.vllm_server status
+```
 
-  ```bash
-  python -m agent.backends.vllm_server stop
-  ```
+Stop it:
 
-- `localizer:`: Localizer Agent model, GPU, number of predict-and-force rounds (`rounds`), cycle
-  window and maximum number of signals.
-- `agent.max_loops`: default number of repair iterations.
-- `simulation:` and `evaluation:`: simulator and timeouts.
+```bash
+python -m agent.backends.vllm_server stop
+```
 
----
+Stop the Localizer Agent's server:
 
-## Other backends
+```bash
+kill -- -"$(cat logs/vllm_server_8001.pid)"
+```
 
-RTLDetective can also run without vLLM:
+**The server does not start or runs out of memory.** Check that the GPUs in `config.yaml` are free
+(`nvidia-smi`), lower `gpu_memory_utilization`, or lower `vllm.max_model_len`. The last lines of the server log are printed when startup fails.
 
-- **HuggingFace transformers** (`--backend hf`): `./run.sh install-local`, then for example
-  `./run.sh debug-local samples/buggy/counter_4bit.v`.
-- **Remote models through OpenRouter** (`--backend openrouter`): copy `.env.example` to `.env`,
-  set `OPENROUTER_API_KEY`, then for example
-  `python -m agent.debug_agent samples/buggy/alu_simple.v --model claude-sonnet --backend openrouter`.
-
-The paper's results were produced with the vLLM backend only. `./run.sh models` lists the model
-shortcuts.
-
----
+**`iverilog: command not found`.** Icarus Verilog is not installed or not on `PATH`. See
+[step 2](#2-install-icarus-verilog).
 
 ## Citation
 
