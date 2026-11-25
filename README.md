@@ -1,8 +1,8 @@
 # RTLDetective
 
-**Agentic RTL Debugging through Dataflow Analysis and Simulation-Guided Fault Localization**
+**Agentic RTL Debugging through Dataflow Analysis and Simulation-Guided Fault Localization** [[Paper]](https://arxiv.org/abs/2611.31709)
 
-Neusha Javidnia, Ruisi Zhang, Farinaz Koushanfar
+Neusha Javidnia, Ruisi Zhang, Farinaz Koushanfar 
 
 RTLDetective finds and fixes functional and syntax bugs in Verilog RTL using a moderately sized,
 locally hosted open-weight LLM. It needs no fine-tuning and no golden reference model. Instead
@@ -252,5 +252,3 @@ If you find this work useful, please cite our paper:
   url           = {https://arxiv.org/abs/2611.31709}
 }
 ```
-
-> Neusha Javidnia, Ruisi Zhang, and Farinaz Koushanfar. **RTLDetective: Agentic RTL Debugging through Dataflow Analysis and Simulation-Guided Fault Localization.** *arXiv preprint arXiv:2611.31709*, 2026. [[Paper]](https://arxiv.org/abs/2611.31709)
