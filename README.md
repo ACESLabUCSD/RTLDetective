@@ -236,3 +236,21 @@ RTLDetective/
 ```
 
 Everything the agent produces goes to `output/` and `logs/`.
+
+## Citation
+
+If you find this work useful, please cite our paper:
+
+```bibtex
+@article{javidnia2026rtldetective,
+  title         = {RTLDetective: Agentic RTL Debugging through Dataflow Analysis and Simulation-Guided Fault Localization},
+  author        = {Javidnia, Neusha and Zhang, Ruisi and Koushanfar, Farinaz},
+  journal       = {arXiv preprint arXiv:2611.31709},
+  year          = {2026},
+  eprint        = {2611.31709},
+  archivePrefix = {arXiv},
+  url           = {https://arxiv.org/abs/2611.31709}
+}
+```
+
+> Neusha Javidnia, Ruisi Zhang, and Farinaz Koushanfar. **RTLDetective: Agentic RTL Debugging through Dataflow Analysis and Simulation-Guided Fault Localization.** *arXiv preprint arXiv:2611.31709*, 2026. [[Paper]](https://arxiv.org/abs/2611.31709)
